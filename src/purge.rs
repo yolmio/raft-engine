@@ -95,8 +95,8 @@ where
             )?;
         }
 
-        if self.needs_rewrite_log_files(LogQueue::Append) {
-            if let (Some(rewrite_watermark), Some(compact_watermark)) =
+        if self.needs_rewrite_log_files(LogQueue::Append)
+            && let (Some(rewrite_watermark), Some(compact_watermark)) =
                 self.append_queue_watermarks()
             {
                 let (first_append, latest_append) = self.pipe_log.file_span(LogQueue::Append);
@@ -126,7 +126,6 @@ where
                     append_queue_barrier,
                 )?;
             }
-        }
         Ok(should_compact.into_iter().collect())
     }
 
@@ -332,6 +331,7 @@ where
         rewrite: Option<FileSeq>,
     ) -> Result<()> {
         // Only use atomic group for rewrite-rewrite operation.
+        #[allow(clippy::redundant_closure_call)]
         let needs_atomicity = (|| {
             fail_point!("force_use_atomic_group", |_| true);
             rewrite.is_none()

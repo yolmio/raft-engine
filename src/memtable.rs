@@ -335,8 +335,8 @@ impl<A: AllocatorTrait> MemTable<A> {
         self.global_stats.add(LogQueue::Rewrite, 1);
         if let Some(origin) = self.kvs.get_mut(&key) {
             if origin.1.queue == LogQueue::Append {
-                if let Some(gate) = gate {
-                    if origin.1.seq <= gate {
+                if let Some(gate) = gate
+                    && origin.1.seq <= gate {
                         origin.1 = FileId {
                             queue: LogQueue::Rewrite,
                             seq,
@@ -344,7 +344,6 @@ impl<A: AllocatorTrait> MemTable<A> {
                         self.global_stats.delete(LogQueue::Append, 1);
                         return;
                     }
-                }
             } else {
                 assert!(origin.1.seq <= seq);
                 origin.1.seq = seq;
@@ -660,11 +659,10 @@ impl<A: AllocatorTrait> MemTable<A> {
         for idx in self.entry_indexes.range(start_pos..end_pos) {
             total_size += idx.entry_len;
             // No matter max_size's value, fetch one entry at least.
-            if let Some(max_size) = max_size {
-                if total_size as usize > max_size && total_size > idx.entry_len {
+            if let Some(max_size) = max_size
+                && total_size as usize > max_size && total_size > idx.entry_len {
                     break;
                 }
-            }
             vec_idx.push(EntryIndex::from_thin(index, *idx));
             index += 1;
         }
@@ -748,13 +746,11 @@ impl<A: AllocatorTrait> MemTable<A> {
             (None, Some(kvs_min)) => kvs_min,
             (None, None) => return None,
         };
-        if queue == LogQueue::Rewrite {
-            if let Some((start, end)) = self.atomic_group {
-                if res <= end {
+        if queue == LogQueue::Rewrite
+            && let Some((start, end)) = self.atomic_group
+                && res <= end {
                     return Some(std::cmp::min(start, res));
                 }
-            }
-        }
         Some(res)
     }
 

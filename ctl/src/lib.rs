@@ -22,15 +22,14 @@ use raft_engine::internals::LogQueue;
 use raft_engine::{Engine, Error, Result as EngineResult};
 
 #[derive(Debug, clap::Parser)]
-#[clap(
+#[command(
     name = "ctl",
     author = crate_authors!(),
     version = crate_version!(),
-    dont_collapse_args_in_usage = true,
 )]
 pub struct ControlOpt {
     // sub command type
-    #[clap(subcommand)]
+    #[command(subcommand)]
     cmd: Option<Cmd>,
 }
 
@@ -39,42 +38,38 @@ enum Cmd {
     /// Dump log entries in data file(s).
     Dump {
         /// Path of Raft Engine directory or specific log file.
-        #[clap(short, long)]
+        #[arg(short, long)]
         path: String,
 
-        #[clap(short, long, use_value_delimiter = true)]
+        #[arg(short, long, value_delimiter = ',')]
         raft_groups: Vec<u64>,
     },
 
     /// Check data files for logical errors.
     Check {
         /// Path of Raft Engine directory.
-        #[clap(short, long)]
+        #[arg(short, long)]
         path: String,
     },
 
     /// Run Rhai script to repair data files.
     Repair {
         /// Path of Raft Engine directory.
-        #[clap(short, long)]
+        #[arg(short, long)]
         path: String,
 
-        #[clap(
-            short,
-            long,
-            possible_values = &["append", "rewrite", "all"]
-        )]
+        #[arg(short, long, value_parser = ["append", "rewrite", "all"])]
         queue: String,
 
         /// Path of Rhai script file.
-        #[clap(short, long)]
+        #[arg(short, long)]
         script: String,
     },
 
     /// Try running `purge_expired_files` on existing data directory.
     TryPurge {
         /// Path of Raft Engine directory.
-        #[clap(short, long)]
+        #[arg(short, long)]
         path: String,
     },
 }

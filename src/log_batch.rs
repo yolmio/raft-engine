@@ -10,7 +10,7 @@ use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 use log::error;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
-use protobuf::Message;
+use prost::Message;
 
 use crate::codec::{self, NumberEncoder};
 use crate::memtable::EntryIndex;
@@ -37,7 +37,7 @@ const MAX_LOG_ENTRIES_SIZE_PER_BATCH: usize = i32::MAX as usize;
 /// `MessageExt` trait allows for probing log index from a specific type of
 /// protobuf messages.
 pub trait MessageExt: Send + Sync {
-    type Entry: Message + Clone + PartialEq;
+    type Entry: Message + Clone + PartialEq + Default;
 
     fn index(e: &Self::Entry) -> u64;
 }
@@ -372,11 +372,11 @@ impl LogItemBatch {
         self.items
     }
 
-    pub fn iter(&self) -> std::slice::Iter<LogItem> {
+    pub fn iter(&self) -> std::slice::Iter<'_, LogItem> {
         self.items.iter()
     }
 
-    pub fn drain(&mut self) -> LogItemDrain {
+    pub fn drain(&mut self) -> LogItemDrain<'_> {
         self.item_size = 0;
         self.entries_size = 0;
         self.checksum = 0;
@@ -477,7 +477,7 @@ impl LogItemBatch {
     }
 
     pub fn put_message<S: Message>(&mut self, region_id: u64, key: Vec<u8>, s: &S) -> Result<()> {
-        self.put(region_id, key, s.write_to_bytes()?);
+        self.put(region_id, key, s.encode_to_vec());
         Ok(())
     }
 
@@ -623,6 +623,7 @@ impl LogBatch {
     /// Moves all log items of `rhs` into `Self`, leaving `rhs` empty.
     pub fn merge(&mut self, rhs: &mut Self) -> Result<()> {
         debug_assert!(self.buf_state == BufState::Open && rhs.buf_state == BufState::Open);
+        #[allow(clippy::redundant_closure_call)]
         let max_entries_size = (|| {
             fail::fail_point!("log_batch::1kb_entries_size_per_batch", |_| 1024);
             MAX_LOG_ENTRIES_SIZE_PER_BATCH
@@ -657,13 +658,14 @@ impl LogBatch {
         let mut entry_indexes = Vec::with_capacity(entries.len());
         self.buf_state = BufState::Incomplete;
         let old_buf_len = self.buf.len();
+        #[allow(clippy::redundant_closure_call)]
         let max_entries_size = (|| {
             fail::fail_point!("log_batch::1kb_entries_size_per_batch", |_| 1024);
             MAX_LOG_ENTRIES_SIZE_PER_BATCH
         })();
         for e in entries {
             let buf_offset = self.buf.len();
-            e.write_to_vec(&mut self.buf)?;
+            e.encode(&mut self.buf)?;
             if self.buf.len() > max_entries_size + LOG_BATCH_HEADER_LEN {
                 self.buf.truncate(old_buf_len);
                 self.buf_state = BufState::Open;
@@ -697,6 +699,7 @@ impl LogBatch {
 
         self.buf_state = BufState::Incomplete;
         let old_buf_len = self.buf.len();
+        #[allow(clippy::redundant_closure_call)]
         let max_entries_size = (|| {
             fail::fail_point!("log_batch::1kb_entries_size_per_batch", |_| 1024);
             MAX_LOG_ENTRIES_SIZE_PER_BATCH
@@ -882,7 +885,7 @@ impl LogBatch {
     }
 
     /// Consumes log items into an iterator.
-    pub(crate) fn drain(&mut self) -> LogItemDrain {
+    pub(crate) fn drain(&mut self) -> LogItemDrain<'_> {
         debug_assert!(!matches!(self.buf_state, BufState::Incomplete));
 
         self.buf.shrink_to(MAX_LOG_BATCH_BUFFER_CAP);
@@ -1019,8 +1022,7 @@ impl AtomicGroupStatus {
             value,
             ..
         }) = &item.content
-        {
-            if *op_type == OpType::Put
+            && *op_type == OpType::Put
                 && crate::is_internal_key(key, Some(ATOMIC_GROUP_KEY))
                 && value.as_ref().unwrap().len() == ATOMIC_GROUP_VALUE_LEN
             {
@@ -1030,7 +1032,6 @@ impl AtomicGroupStatus {
                     AtomicGroupStatus::from_u8(value[0]).unwrap(),
                 ));
             }
-        }
         None
     }
 }
@@ -1116,7 +1117,6 @@ mod tests {
     use super::*;
     use crate::pipe_log::{LogQueue, Version};
     use crate::test_util::{catch_unwind_silent, generate_entries, generate_entry_indexes_opt};
-    use protobuf::parse_from_bytes;
     use raft::eraftpb::Entry;
     use strum::IntoEnumIterator;
 
@@ -1131,7 +1131,7 @@ mod tests {
                 LogBatch::decode_entries_block(buf, ei.entries.unwrap(), ei.compression_type)
                     .unwrap();
             entries.push(
-                parse_from_bytes(
+                M::Entry::decode(
                     &block[ei.entry_offset as usize..(ei.entry_offset + ei.entry_len) as usize],
                 )
                 .unwrap(),
@@ -1575,7 +1575,7 @@ mod tests {
         ));
         assert!(matches!(
             batch
-                .put_message(0, crate::make_internal_key(ATOMIC_GROUP_KEY), &Entry::new())
+                .put_message(0, crate::make_internal_key(ATOMIC_GROUP_KEY), &Entry::default())
                 .unwrap_err(),
             Error::InvalidArgument(_)
         ));
@@ -1627,17 +1627,17 @@ mod tests {
     #[cfg(feature = "nightly")]
     #[bench]
     fn bench_log_batch_add_entry_and_encode(b: &mut test::Bencher) {
-        use rand::{thread_rng, Rng};
+        use rand::{rng, Rng};
         fn details(log_batch: &mut LogBatch, entries: &[Entry], regions: usize) {
             for _ in 0..regions {
                 log_batch
-                    .add_entries::<Entry>(thread_rng().gen(), entries)
+                    .add_entries::<Entry>(rng().random(), entries)
                     .unwrap();
             }
             log_batch.finish_populate(0, None).unwrap();
             let _ = log_batch.drain();
         }
-        let data: Vec<u8> = (0..128).map(|_| thread_rng().gen()).collect();
+        let data: Vec<u8> = (0..128).map(|_| rng().random()).collect();
         let entries = generate_entries(1, 11, Some(&data));
         let mut log_batch = LogBatch::default();
         // warm up

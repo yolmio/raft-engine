@@ -1,10 +1,17 @@
 // Copyright (c) 2017-present, PingCAP, Inc. Licensed under Apache-2.0.
 
-use kvproto::raft_serverpb::RaftLocalState;
+use prost::Message;
 use raft::eraftpb::Entry;
 use raft_engine::{Config, Engine, LogBatch, MessageExt, ReadableSize};
-use rand::thread_rng;
+use rand::rng;
 use rand_distr::{Distribution, Normal};
+
+/// Simple test state struct
+#[derive(Clone, PartialEq, Message)]
+pub struct RaftLocalState {
+    #[prost(uint64, tag = "1")]
+    pub last_index: u64,
+}
 
 #[derive(Clone)]
 pub struct MessageExtTyped;
@@ -34,16 +41,16 @@ fn main() {
 
     let mut rand_regions = Normal::new(128.0, 96.0)
         .unwrap()
-        .sample_iter(thread_rng())
+        .sample_iter(rng())
         .map(|x| x as u64);
     let mut rand_compacts = Normal::new(compact_offset as f64, 16.0)
         .unwrap()
-        .sample_iter(thread_rng())
+        .sample_iter(rng())
         .map(|x| x as u64);
 
     let mut batch = LogBatch::with_capacity(256);
-    let mut entry = Entry::new();
-    entry.set_data(vec![b'x'; 1024 * 32].into());
+    let mut entry = Entry::default();
+    entry.data = vec![b'x'; 1024 * 32].into();
     let init_state = RaftLocalState {
         last_index: 0,
         ..Default::default()

@@ -16,7 +16,7 @@ use parking_lot_core::SpinWait;
 use raft::eraftpb::Entry;
 use raft_engine::internals::{EventListener, FileBlockHandle};
 use raft_engine::{Command, Config, Engine, LogBatch, MessageExt, ReadableSize, Version};
-use rand::{thread_rng, Rng, RngCore};
+use rand::{rng, Rng, RngCore};
 
 type WriteBatch = LogBatch;
 
@@ -47,202 +47,180 @@ const DEFAULT_WRITE_REGION_COUNT: u64 = 5;
 const DEFAULT_WRITE_SYNC: bool = false;
 
 #[derive(Debug, Clone, Parser)]
-#[clap(
+#[command(
     name = "Engine Stress (stress)",
     about = "A stress test tool for Raft Engine",
     author = crate_authors!(),
     version = crate_version!(),
-    dont_collapse_args_in_usage = true,
 )]
 struct ControlOpt {
     /// Path of raft-engine storage directory
-    #[clap(
-        long = "path",
-        takes_value = true,
-        help = "Set the data path for Raft Engine"
-    )]
+    #[arg(long = "path", help = "Set the data path for Raft Engine")]
     path: String,
 
-    #[clap(
+    #[arg(
         long = "time",
-        takes_value = true,
         default_value = formatcp!("{}", DEFAULT_TIME.as_secs()),
         value_name = "time[s]",
         help = "Set the stress test time"
     )]
     time: u64,
 
-    #[clap(
+    #[arg(
         long = "regions",
-        takes_value = true,
         default_value = formatcp!("{}", DEFAULT_REGIONS),
         help = "Set the region count"
     )]
     regions: u64,
 
-    #[clap(
+    #[arg(
         long = "purge-interval",
         value_name = "interval[s]",
-        takes_value = true,
         default_value = formatcp!("{}", DEFAULT_PURGE_INTERVAL.as_secs()),
         help = "Set the interval to purge obsolete log files"
     )]
     purge_interval: u64,
 
-    #[clap(
+    #[arg(
         long = "compact-count",
         value_name = "n",
-        takes_value = true,
-        required = false,
         help = "Compact log entries exceeding this threshold"
     )]
     compact_count: Option<u64>,
 
-    #[clap(
+    #[arg(
         long = "force-compact-factor",
         value_name = "factor",
-        takes_value = true,
         default_value = "0.5",
-        validator = |s| {
-            let factor = s.parse::<f64>().unwrap();
-            if factor >= 1.0 {
-                Err(String::from("Factor must be smaller than 1.0"))
-            } else if factor <= 0.0 {
-                Err(String::from("Factor must be positive"))
-            } else {
-                Ok(())
-            }
-        },
+        value_parser = parse_force_compact_factor,
         help = "Factor to shrink raft log during force compact"
     )]
     force_compact_factor: f64,
 
-    #[clap(
+    #[arg(
         long = "write-threads",
-        takes_value = true,
         default_value = formatcp!("{}", DEFAULT_WRITE_THREADS),
         help = "Set the thread count for writing logs"
     )]
     write_threads: u64,
 
-    #[clap(
+    #[arg(
         long = "write-ops-per-thread",
         value_name = "ops",
-        takes_value = true,
         default_value = formatcp!("{}", DEFAULT_WRITE_OPS_PER_THREAD),
         help = "Set the per-thread OPS for read entry requests"
     )]
     write_ops_per_thread: u64,
 
-    #[clap(
+    #[arg(
         long = "read-threads",
         value_name = "threads",
-        takes_value = true,
         default_value = formatcp!("{}", DEFAULT_READ_THREADS),
         help = "Set the thread count for reading logs"
     )]
     read_threads: u64,
 
-    #[clap(
+    #[arg(
         long = "read-ops-per-thread",
         value_name = "ops",
-        takes_value = true,
         default_value = formatcp!("{}", DEFAULT_READ_OPS_PER_THREAD),
         help = "Set the per-thread OPS for read entry requests"
     )]
     read_ops_per_thread: u64,
 
-    #[clap(
+    #[arg(
         long = "entry-size",
         value_name = "size",
-        takes_value = true,
         default_value = formatcp!("{}", DEFAULT_ENTRY_SIZE),
         help = "Set the average size of log entry"
     )]
     entry_size: usize,
 
-    #[clap(
+    #[arg(
         long = "write-entry-count",
         value_name = "count",
-        takes_value = true,
         default_value = formatcp!("{}", DEFAULT_WRITE_ENTRY_COUNT),
         help = "Set the average number of written entries of a region in a log batch"
     )]
     write_entry_count: u64,
 
-    #[clap(
+    #[arg(
         long = "write-region-count",
         value_name = "count",
-        takes_value = true,
         default_value = formatcp!("{}", DEFAULT_WRITE_REGION_COUNT),
         help = "Set the average number of written regions in a log batch"
     )]
     write_region_count: u64,
 
-    #[clap(long = "write-without-sync", help = "Do not sync after write")]
+    #[arg(long = "write-without-sync", help = "Do not sync after write")]
     write_without_sync: bool,
 
-    #[clap(long = "reuse-data", help = "Reuse existing data in specified path")]
+    #[arg(long = "reuse-data", help = "Reuse existing data in specified path")]
     reuse_data: bool,
 
-    #[clap(
+    #[arg(
         long = "target-file-size",
         value_name = "size",
-        takes_value = true,
         default_value = "128MB",
         help = "Target log file size for Raft Engine"
     )]
     target_file_size: String,
 
-    #[clap(
+    #[arg(
         long = "purge-threshold",
         value_name = "size",
-        takes_value = true,
         default_value = "10GB",
         help = "Purge if log files are greater than this threshold"
     )]
     purge_threshold: String,
 
-    #[clap(
+    #[arg(
         long = "purge-rewrite-threshold",
         value_name = "size",
-        takes_value = true,
         default_value = "1GB",
         help = "Purge if rewrite log files are greater than this threshold"
     )]
     purge_rewrite_threshold: String,
 
-    #[clap(
+    #[arg(
         long = "purge-rewrite-garbage-ratio",
         value_name = "ratio",
-        takes_value = true,
         default_value = "0.6",
         help = "Purge if rewrite log files garbage ratio is greater than this threshold"
     )]
     purge_rewrite_garbage_ratio: f64,
 
-    #[clap(
+    #[arg(
         long = "compression-threshold",
         value_name = "size",
-        takes_value = true,
         default_value = "8KB",
         help = "Compress log batch bigger than this threshold"
     )]
     batch_compression_threshold: String,
 
-    #[clap(
+    #[arg(
         long = "format-version",
-        takes_value = true,
         default_value = "1",
         help = "Format version of log files"
     )]
     format_version: u64,
 
-    #[clap(
+    #[arg(
         long = "enable-log-recycle",
         help = "Recycle purged and stale logs for incoming writing"
     )]
     enable_log_recycle: bool,
+}
+
+fn parse_force_compact_factor(s: &str) -> Result<f64, String> {
+    let factor = s.parse::<f64>().map_err(|e| e.to_string())?;
+    if factor >= 1.0 {
+        Err(String::from("Factor must be smaller than 1.0"))
+    } else if factor <= 0.0 {
+        Err(String::from("Factor must be positive"))
+    } else {
+        Ok(factor)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -410,7 +388,7 @@ fn spawn_write(
             };
             for _ in 0..args.write_entry_count {
                 let mut data = vec![0; args.entry_size];
-                thread_rng().fill_bytes(&mut data);
+                rng().fill_bytes(&mut data);
                 entry_batch.push(Entry {
                     data: data.into(),
                     ..Default::default()
@@ -418,7 +396,7 @@ fn spawn_write(
             }
             while !shutdown.load(Ordering::Relaxed) {
                 // TODO(tabokie): scattering regions in one batch
-                let mut rid = thread_rng().gen_range(0..(args.regions / args.write_threads))
+                let mut rid = rng().random_range(0..(args.regions / args.write_threads))
                     * args.write_threads
                     + index;
                 for _ in 0..args.write_region_count {
@@ -472,7 +450,7 @@ fn spawn_read(
                 None
             };
             while !shutdown.load(Ordering::Relaxed) {
-                let rid = thread_rng().gen_range(0..(args.regions / args.read_threads))
+                let rid = rng().random_range(0..(args.regions / args.read_threads))
                     * args.read_threads
                     + index;
                 let mut start = Instant::now();
@@ -527,7 +505,7 @@ fn prepare_entries(entries: &[Entry], mut start_index: u64) -> Vec<Entry> {
         .iter()
         .cloned()
         .map(|mut e| {
-            e.set_index(start_index);
+            e.index = start_index;
             start_index += 1;
             e
         })

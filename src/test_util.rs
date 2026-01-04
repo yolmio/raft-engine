@@ -10,12 +10,12 @@ use crate::{
 };
 
 pub fn generate_entries(begin_index: u64, end_index: u64, data: Option<&[u8]>) -> Vec<Entry> {
-    let mut v = vec![Entry::new(); (end_index - begin_index) as usize];
+    let mut v = vec![Entry::default(); (end_index - begin_index) as usize];
     let mut index = begin_index;
     for e in v.iter_mut() {
-        e.set_index(index);
+        e.index = index;
         if let Some(data) = data {
-            e.set_data(data.to_vec().into())
+            e.data = data.to_vec().into();
         }
         index += 1;
     }
@@ -66,19 +66,29 @@ pub struct PanicGuard {
     prev_hook: *mut (dyn Fn(&panic::PanicHookInfo<'_>) + Sync + Send + 'static),
 }
 
-struct PointerHolder<T: ?Sized>(*mut T);
+/// A wrapper around a raw pointer to a panic hook that is Send + Sync.
+/// The wrapper provides a call method to invoke the hook, ensuring that
+/// closures capture the wrapper (which is Send+Sync) rather than the
+/// raw pointer field (which is not).
+struct SendablePanicHook(*mut (dyn Fn(&panic::PanicHookInfo<'_>) + Sync + Send + 'static));
 
-unsafe impl<T: Send + ?Sized> Send for PointerHolder<T> {}
-unsafe impl<T: Sync + ?Sized> Sync for PointerHolder<T> {}
+unsafe impl Send for SendablePanicHook {}
+unsafe impl Sync for SendablePanicHook {}
+
+impl SendablePanicHook {
+    fn call(&self, info: &panic::PanicHookInfo<'_>) {
+        unsafe { (*self.0)(info) }
+    }
+}
 
 impl PanicGuard {
     pub fn with_prompt(s: String) -> Self {
         let prev_hook = Box::into_raw(panic::take_hook());
-        let sendable_prev_hook = PointerHolder(prev_hook);
+        let sendable_hook = SendablePanicHook(prev_hook);
         // FIXME: Use thread local hook.
         panic::set_hook(Box::new(move |info| {
             eprintln!("{s}");
-            unsafe { (*sendable_prev_hook.0)(info) };
+            sendable_hook.call(info);
         }));
         PanicGuard { prev_hook }
     }

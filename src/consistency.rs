@@ -27,8 +27,8 @@ impl ConsistencyChecker {
 impl ReplayMachine for ConsistencyChecker {
     fn replay(&mut self, item_batch: LogItemBatch, _file_id: FileId) -> Result<()> {
         for item in item_batch.iter() {
-            if let LogItemContent::EntryIndexes(ents) = &item.content {
-                if !ents.0.is_empty() {
+            if let LogItemContent::EntryIndexes(ents) = &item.content
+                && !ents.0.is_empty() {
                     let incoming_first_index = ents.0.first().unwrap().index;
                     let incoming_last_index = ents.0.last().unwrap().index;
                     let index_range = self
@@ -42,7 +42,6 @@ impl ReplayMachine for ConsistencyChecker {
                     }
                     index_range.1 = incoming_last_index;
                 }
-            }
         }
         Ok(())
     }

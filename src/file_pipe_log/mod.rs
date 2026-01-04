@@ -112,13 +112,12 @@ pub mod debug {
                 .filter_map(|e| {
                     if let Ok(e) = e {
                         let p = e.path();
-                        if p.is_file() {
-                            if let Some(file_id) =
+                        if p.is_file()
+                            && let Some(file_id) =
                                 FileId::parse_file_name(p.file_name().unwrap().to_str().unwrap())
                             {
                                 return Some((file_id, p));
                             }
-                        }
                     }
                     None
                 })

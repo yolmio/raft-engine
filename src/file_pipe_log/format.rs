@@ -51,8 +51,8 @@ pub trait FileNameExt: Sized {
 
 impl FileNameExt for FileId {
     fn parse_file_name(file_name: &str) -> Option<FileId> {
-        if file_name.len() > LOG_SEQ_WIDTH {
-            if let Ok(seq) = file_name[..LOG_SEQ_WIDTH].parse::<u64>() {
+        if file_name.len() > LOG_SEQ_WIDTH
+            && let Ok(seq) = file_name[..LOG_SEQ_WIDTH].parse::<u64>() {
                 if file_name.ends_with(LOG_APPEND_SUFFIX) {
                     return Some(FileId {
                         queue: LogQueue::Append,
@@ -65,7 +65,6 @@ impl FileNameExt for FileId {
                     });
                 }
             }
-        }
         None
     }
 
@@ -79,15 +78,13 @@ impl FileNameExt for FileId {
 }
 
 pub fn parse_reserved_file_name(file_name: &str) -> Option<FileSeq> {
-    if file_name.len() > LOG_SEQ_WIDTH {
-        if let Ok(seq) = file_name[..LOG_SEQ_WIDTH].parse::<u64>() {
-            if file_name.ends_with(LOG_APPEND_RESERVED_SUFFIX) {
+    if file_name.len() > LOG_SEQ_WIDTH
+        && let Ok(seq) = file_name[..LOG_SEQ_WIDTH].parse::<u64>()
+            && file_name.ends_with(LOG_APPEND_RESERVED_SUFFIX) {
                 // As reserved files are only used for LogQueue::Append,
                 // we just return the related FileSeq of it.
                 return Some(seq);
             }
-        }
-    }
     None
 }
 

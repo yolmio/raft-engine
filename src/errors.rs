@@ -17,8 +17,10 @@ pub enum Error {
     Io(#[from] IoError),
     #[error("Codec Error: {0}")]
     Codec(#[from] CodecError),
-    #[error("Protobuf Error: {0}")]
-    Protobuf(#[from] protobuf::ProtobufError),
+    #[error("Prost Decode Error: {0}")]
+    ProstDecode(#[from] prost::DecodeError),
+    #[error("Prost Encode Error: {0}")]
+    ProstEncode(#[from] prost::EncodeError),
     #[error("TryAgain Error: {0}")]
     TryAgain(String),
     #[error("Entry Compacted")]

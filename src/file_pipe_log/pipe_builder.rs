@@ -419,7 +419,7 @@ impl<F: FileSystem> DualPipesBuilder<F> {
                                 f.format = LogFileFormat::default();
                                 continue;
                             } else {
-                                error!(
+                                warn!(
                                     "Failed to open log file due to broken header (queue={:?},seq={}): {}",
                                     queue, f.seq, e
                                 );
@@ -448,7 +448,7 @@ impl<F: FileSystem> DualPipesBuilder<F> {
                                     then {
                                         let offset = handle.offset as usize - LOG_BATCH_HEADER_LEN;
                                         if recovery_mode == RecoveryMode::AbsoluteConsistency {
-                                            error!(
+                                            warn!(
                                                 "Failed to open log file due to broken entry (queue={:?},seq={},offset={}): {}",
                                                 queue, f.seq, offset, e
                                             );
@@ -481,7 +481,7 @@ impl<F: FileSystem> DualPipesBuilder<F> {
                                 break;
                             }
                             Err(e) => {
-                                error!(
+                                warn!(
                                     "Failed to open log file due to broken batch (queue={:?},seq={},offset={}): {}",
                                     queue, f.seq, reader.valid_offset(), e
                                 );

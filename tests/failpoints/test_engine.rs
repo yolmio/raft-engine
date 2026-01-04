@@ -5,13 +5,20 @@ use std::sync::{Arc, Barrier};
 use std::time::Duration;
 
 use fail::FailGuard;
-use kvproto::raft_serverpb::RaftLocalState;
+use prost::Message;
 use raft::eraftpb::Entry;
 use raft_engine::env::{FileSystem, ObfuscatedFileSystem};
 use raft_engine::internals::*;
 use raft_engine::*;
 
 use crate::util::*;
+
+/// Simple test state struct
+#[derive(Clone, PartialEq, Message)]
+pub struct RaftLocalState {
+    #[prost(uint64, tag = "1")]
+    pub last_index: u64,
+}
 
 fn append<FS: FileSystem>(
     engine: &Engine<FS>,
@@ -229,7 +236,7 @@ fn test_concurrent_write_empty_log_batch() {
     let mut ctx = ConcurrentWriteContext::new(engine.clone());
 
     let some_entries = vec![
-        Entry::new(),
+        Entry::default(),
         Entry {
             index: 1,
             ..Default::default()
@@ -579,7 +586,7 @@ fn test_concurrent_write_perf_context() {
     };
 
     let some_entries = vec![
-        Entry::new(),
+        Entry::default(),
         Entry {
             index: 1,
             ..Default::default()

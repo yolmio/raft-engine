@@ -551,11 +551,10 @@ pub(crate) fn find_available_dir(paths: &Paths, target_size: usize) -> PathId {
     // space usage.
     if paths.len() > 1 {
         for (t, p) in paths.iter().enumerate() {
-            if let Ok(disk_stats) = fs2::statvfs(p) {
-                if target_size <= disk_stats.available_space() as usize {
+            if let Ok(disk_stats) = fs2::statvfs(p)
+                && target_size <= disk_stats.available_space() as usize {
                     return t;
                 }
-            }
         }
     }
     DEFAULT_PATH_ID

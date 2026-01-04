@@ -8,7 +8,7 @@ use std::thread::{Builder as ThreadBuilder, JoinHandle};
 use std::time::{Duration, Instant};
 
 use log::{error, info};
-use protobuf::{parse_from_bytes, Message};
+use prost::Message;
 
 use crate::config::{Config, RecoveryMode};
 use crate::consistency::ConsistencyChecker;
@@ -235,13 +235,16 @@ where
         Ok(())
     }
 
-    pub fn get_message<S: Message>(&self, region_id: u64, key: &[u8]) -> Result<Option<S>> {
+    pub fn get_message<S: Message + Default>(
+        &self,
+        region_id: u64,
+        key: &[u8],
+    ) -> Result<Option<S>> {
         let _t = StopWatch::new(&*ENGINE_READ_MESSAGE_DURATION_HISTOGRAM);
-        if let Some(memtable) = self.memtables.get(region_id) {
-            if let Some(value) = memtable.read().get(key) {
-                return Ok(Some(parse_from_bytes(&value)?));
+        if let Some(memtable) = self.memtables.get(region_id)
+            && let Some(value) = memtable.read().get(key) {
+                return Ok(Some(S::decode(value.as_slice())?));
             }
-        }
         Ok(None)
     }
 
@@ -264,11 +267,11 @@ where
         mut callback: C,
     ) -> Result<()>
     where
-        S: Message,
+        S: Message + Default,
         C: FnMut(&[u8], S) -> bool,
     {
         self.scan_raw_messages(region_id, start_key, end_key, reverse, move |k, raw_v| {
-            if let Ok(v) = parse_from_bytes(raw_v) {
+            if let Ok(v) = S::decode(raw_v) {
                 callback(k, v)
             } else {
                 true
@@ -304,15 +307,14 @@ where
         log_idx: u64,
     ) -> Result<Option<M::Entry>> {
         let _t = StopWatch::new(&*ENGINE_READ_ENTRY_DURATION_HISTOGRAM);
-        if let Some(memtable) = self.memtables.get(region_id) {
-            if let Some(idx) = memtable.read().get_entry(log_idx) {
+        if let Some(memtable) = self.memtables.get(region_id)
+            && let Some(idx) = memtable.read().get_entry(log_idx) {
                 ENGINE_READ_ENTRY_COUNT_HISTOGRAM.observe(1.0);
                 return Ok(Some(read_entry_from_file::<M, _>(
                     self.pipe_log.as_ref(),
                     &idx,
                 )?));
             }
-        }
         Ok(None)
     }
 
@@ -614,7 +616,7 @@ where
                 )?,
             );
         }
-        let e = parse_from_bytes(
+        let e = M::Entry::decode(
             &cache.block.borrow()
                 [idx.entry_offset as usize..(idx.entry_offset + idx.entry_len) as usize],
         )?;
@@ -653,9 +655,21 @@ pub(crate) mod tests {
     use crate::pipe_log::Version;
     use crate::test_util::{generate_entries, PanicGuard};
     use crate::util::ReadableSize;
-    use kvproto::raft_serverpb::RaftLocalState;
     use raft::eraftpb::Entry;
-    use rand::{thread_rng, Rng};
+
+    /// Simple test state struct to replace kvproto::RaftLocalState
+    #[derive(Clone, PartialEq, prost::Message)]
+    pub struct RaftLocalState {
+        #[prost(uint64, tag = "1")]
+        pub last_index: u64,
+    }
+
+    impl RaftLocalState {
+        pub fn new() -> Self {
+            Self::default()
+        }
+    }
+    use rand::{rng, Rng};
     use std::collections::{BTreeSet, HashSet};
     use std::fs::OpenOptions;
     use std::path::PathBuf;
@@ -1407,14 +1421,14 @@ pub(crate) mod tests {
                 .unwrap();
 
         let mut log_batch = LogBatch::default();
-        let empty_entry = Entry::new();
-        assert_eq!(empty_entry.compute_size(), 0);
+        let empty_entry = Entry::default();
+        assert_eq!(empty_entry.encoded_len(), 0);
         log_batch
             .add_entries::<Entry>(0, &[empty_entry.clone()])
             .unwrap();
         engine.write(&mut log_batch, false).unwrap();
         let empty_state = RaftLocalState::new();
-        assert_eq!(empty_state.compute_size(), 0);
+        assert_eq!(empty_state.encoded_len(), 0);
         log_batch
             .put_message(1, b"key".to_vec(), &empty_state)
             .unwrap();
@@ -1968,7 +1982,7 @@ pub(crate) mod tests {
         }
         let mut vec: Vec<Entry> = Vec::new();
         b.iter(move || {
-            let region_id = thread_rng().gen_range(1..=100);
+            let region_id = rng().random_range(1..=100);
             engine
                 .fetch_entries_to::<Entry>(region_id, 1, 101, None, &mut vec)
                 .unwrap();
@@ -2631,7 +2645,7 @@ pub(crate) mod tests {
                 std::thread::sleep(Duration::from_millis(10));
             }
             for _ in 0..10 {
-                let region_id = thread_rng().gen_range(1..=10);
+                let region_id = rng().random_range(1..=10);
                 // Should not return file seqno out of range error.
                 let _ = fetch_engine
                     .fetch_entries_to::<Entry>(region_id, 1, 101, None, &mut vec)
