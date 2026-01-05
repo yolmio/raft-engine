@@ -68,9 +68,10 @@ thiserror = "2"
 criterion = "0.8"
 ctor = "0.6"
 env_logger = "0.11"
-raft = { path = "../raft-rs", default-features = false, features = [
-  "prost-codec",
-] }
+# Commented out for Nix vendoring - uncomment for local testing
+# raft = { path = "../raft-rs", default-features = false, features = [
+#   "prost-codec",
+# ] }
 rand = "0.9"
 rand_distr = "0.5"
 tempfile = "3"
@@ -87,5 +88,6 @@ std_fs = []
 
 nightly_group = ["nightly", "swap"]
 
-[workspace]
-members = ["stress", "ctl"]
+# Workspace members removed for Nix vendoring - they have path dependencies
+# [workspace]
+# members = ["stress", "ctl"]
